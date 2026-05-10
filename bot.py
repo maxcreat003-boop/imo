@@ -25,11 +25,10 @@ class ImoBotV5:
     def __init__(self):
         self.number_queue = asyncio.Queue()
         self.clone_status = {i: "Idle" for i in range(1, 11)}
-        self.screen_lock = asyncio.Lock()  # Android can only have 1 foreground app at a time
+        self.screen_lock = asyncio.Lock()
         self.processed_count = 0
 
     async def run_adb(self, command: str) -> str:
-        """Asynchronous execution of ADB commands."""
         process = await asyncio.create_subprocess_shell(
             f"adb {command}",
             stdout=asyncio.subprocess.PIPE,
@@ -58,40 +57,43 @@ class ImoBotV5:
         await asyncio.sleep(5)
         logging.info(f"Typing number: {phone_number}")
         await self.run_adb(f"shell input text {phone_number}")
+        await asyncio.sleep(2)
+        await self.run_adb("shell input keyevent 66") 
+        await asyncio.sleep(3)
+        await self.run_adb("shell input keyevent 22") 
         await asyncio.sleep(1)
         await self.run_adb("shell input keyevent 66") 
-        await asyncio.sleep(2)
-        await self.run_adb("shell input keyevent 22") 
-        await asyncio.sleep(0.5)
-        await self.run_adb("shell input keyevent 66") 
-        await asyncio.sleep(4)
+        await asyncio.sleep(5)
 
     async def worker_loop(self):
         while True:
             phone_number = await self.number_queue.get()
             clone_num = None
+            
             while not clone_num:
                 clone_num = self.get_available_clone()
                 if not clone_num:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(5)
             
             user_id = await self.get_user_id(clone_num)
             if user_id == -1:
+                logging.warning(f"Clone_{clone_num} not ready. Re-queuing number.")
+                await self.number_queue.put(phone_number)
                 self.number_queue.task_done()
+                await asyncio.sleep(10)
                 continue
 
             self.clone_status[clone_num] = f"Processing {phone_number}"
             async with self.screen_lock:
                 try:
                     await self.run_adb(f"shell pm clear --user {user_id} {PACKAGE}")
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
                     await self.run_adb(f"shell am start --user {user_id} -n {PACKAGE}/{ACTIVITY}")
                     await self.automate_ui_flow(phone_number)
                 except Exception as e:
                     logging.error(f"Error processing {phone_number}: {e}")
                 finally:
                     await self.run_adb(f"shell am force-stop --user {user_id} {PACKAGE}")
-                    await self.run_adb(f"shell pm clear --user {user_id} {PACKAGE}")
             
             self.processed_count += 1
             self.clone_status[clone_num] = "Idle"
@@ -110,23 +112,33 @@ class ImoBotV5:
         file_path = "temp_numbers.txt"
         await file.download_to_drive(file_path)
         count = 0
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 numbers = re.findall(r'\b\d{7,15}\b', line)
                 for num in numbers:
                     await self.number_queue.put(num); count += 1
         os.remove(file_path)
-        await update.message.reply_text(f"📄 Added {count} numbers. Total in queue: {self.number_queue.qsize()}")
+        await update.message.reply_text(f"📄 Added {count} numbers from file.")
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
+        
+        # ADB Check
+        adb_devices = await self.run_adb("devices")
+        adb_status = "✅ Online" if "device" in adb_devices.splitlines()[-1] else "⏳ Booting (Software Mode)..."
+        
         active_clones = sum(1 for s in self.clone_status.values() if s != "Idle")
+        ready_clones = 0
+        for i in range(1, 11):
+            if await self.get_user_id(i) != -1: ready_clones += 1
+
         dashboard = (
-            "🤖 **IMO Fully Auto Bot (v5.1)**\n\n"
+            "🤖 **IMO Fully Auto Bot (v5.5)**\n\n"
+            f"📡 **ADB**: {adb_status}\n"
             f"💻 **CPU**: {cpu}% | 🧠 **RAM**: {ram}%\n"
             f"📊 **Queue**: {self.number_queue.qsize()} | ✅ **Total**: {self.processed_count}\n"
-            f"🔥 **Clones**: {active_clones}/10"
+            f"🔥 **Clones Ready**: {ready_clones}/10"
         )
         await update.message.reply_text(dashboard, parse_mode='Markdown')
 
@@ -136,17 +148,12 @@ async def post_init(application):
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("BOT_TOKEN missing")
-        exit(1)
-
+        print("BOT_TOKEN missing"); exit(1)
     bot_instance = ImoBotV5()
     application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     application.bot_data['bot_instance'] = bot_instance
-    
     application.add_handler(CommandHandler("start", bot_instance.cmd_start))
     application.add_handler(CommandHandler("status", bot_instance.cmd_start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot_instance.handle_text))
-    application.add_handler(MessageHandler(filters.Document.TXT, bot_instance.handle_document))
-
-    print("Bot is starting...")
+    app.add_handler(MessageHandler(filters.Document.TXT, bot_instance.handle_document))
     application.run_polling()
