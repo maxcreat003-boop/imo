@@ -1,0 +1,4 @@
+DockerInstaller.exe
+.git
+.env
+*.md
