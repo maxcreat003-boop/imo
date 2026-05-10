@@ -1,53 +1,44 @@
 #!/bin/bash
 
-# [v8.0 COMMAND CENTER]
+# [v9.0 EMERGENCY REPAIR]
 LOG_FILE="/app/bot_logs.txt"
-
-# Redirect all standard and error output to the log file for /logs command
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-echo "[v8.0] Command Center Initialization..."
+echo "[v9.0] Emergency Repair Initialization..."
 
-TOTAL_RAM=$(free -g | awk '/^Mem:/{print $2}')
-
-# Start Bot Immediately
+# Start Bot IMMEDIATELY (v9.0 handles own ADB reconnects)
 /opt/venv/bin/python3 /app/bot.py &
 
-if [ "$TOTAL_RAM" -lt 2 ]; then
-    echo "[ADAPTIVE] Safe Mode (1GB RAM). 600s Wait."
-    BOOT_WAIT=600
-else
-    echo "[ADAPTIVE] Performance Mode. 160s Wait."
-    BOOT_WAIT=160
-fi
+# Stripping even more system load
+echo "[SYSTEM] Optimizing Android for 1GB RAM..."
+# Disable Google Play Services if possible (generic attempt)
+adb shell pm disable-user --user 0 com.google.android.gms >/dev/null 2>&1
 
-sleep $BOOT_WAIT
+echo "[BOOT] Waiting 600s for Software TCG boot..."
+sleep 600
 
 adb connect localhost:5555
 
-MAX_RETRIES=40
-RETRY_COUNT=0
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+# Auto-Recovery Loop in Shell
+while true; do
     STATUS=$(adb get-state 2>&1)
-    if [ "$STATUS" == "device" ]; then
-        echo "[SUCCESS] Emulator online."
-        break
+    if [ "$STATUS" != "device" ]; then
+        echo "[RECOVERY] ADB Offline. Status: $STATUS. Reconnecting..."
+        adb connect localhost:5555
     fi
-    echo "[WAIT] Status: $STATUS. Retrying..."
-    sleep 30
-    RETRY_COUNT=$((RETRY_COUNT+1))
-    adb connect localhost:5555
-done
-
-echo "[SYSTEM] Provisioning Profiles..."
-for i in {1..10}
-do
-    USER_ID=$(adb shell pm create-user Clone_$i | grep -oE '[0-9]+')
-    if [ ! -z "$USER_ID" ]; then
-        adb shell pm install-existing --user $USER_ID com.imo.android.imoimlite
+    
+    # Check if we need to create users (only once)
+    if [ ! -f "/app/.users_created" ] && [ "$STATUS" == "device" ]; then
+        echo "[SYSTEM] Provisioning Profiles..."
+        for i in {1..10}; do
+            USER_ID=$(adb shell pm create-user Clone_$i | grep -oE '[0-9]+')
+            if [ ! -z "$USER_ID" ]; then
+                adb shell pm install-existing --user $USER_ID com.imo.android.imoimlite
+            fi
+            sleep 15
+        done
+        touch /app/.users_created
     fi
-    if [ "$TOTAL_RAM" -lt 2 ]; then sleep 15; else sleep 2; fi
+    
+    sleep 60
 done
-
-echo "[READY] Command Center v8.0 is operational."
-wait
