@@ -61,7 +61,9 @@ class ImoBotV4:
             f"💻 **CPU Usage**: {cpu}%\n"
             f"🧠 **RAM Usage**: {ram}%\n"
             f"👥 **Profiles Configured**: 10\n\n"
-            "Use `/clone <1-10>` to launch a specific profile."
+            "**Commands:**\n"
+            "▶️ `/clone <1-10>` - Launch IMO for a profile\n"
+            "🔄 `/reset <1-10>` - Close app and clear data for next number"
         )
         await update.message.reply_text(dashboard, parse_mode='Markdown')
 
@@ -86,6 +88,29 @@ class ImoBotV4:
         
         await update.message.reply_text(f"✅ Launched IMO for Clone_{clone_num} (Android User ID: {user_id}).")
 
+    async def cmd_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Force stop and clear data for a specific clone to prepare for the next number."""
+        try:
+            clone_num = int(context.args[0])
+            if clone_num < 1 or clone_num > 10:
+                raise ValueError
+        except (IndexError, ValueError):
+            await update.message.reply_text("❌ Usage: `/reset <1-10>`", parse_mode='Markdown')
+            return
+
+        user_id = await self.get_user_id(clone_num)
+        if user_id == -1:
+            await update.message.reply_text(f"❌ Clone_{clone_num} user profile not found.", parse_mode='Markdown')
+            return
+
+        # Force stop the app
+        await self.run_adb(f"shell am force-stop --user {user_id} {PACKAGE}")
+        # Clear app data
+        await self.run_adb(f"shell pm clear --user {user_id} {PACKAGE}")
+        
+        self.user_slots[clone_num] = "Cleared"
+        await update.message.reply_text(f"🧹 **Data Cleared!** Clone_{clone_num} is now completely reset and ready for a fresh new number.", parse_mode='Markdown')
+
 async def main():
     if not TOKEN:
         logging.error("BOT_TOKEN is not set in the environment.")
@@ -97,6 +122,7 @@ async def main():
     app.add_handler(CommandHandler("start", bot_instance.cmd_start))
     app.add_handler(CommandHandler("status", bot_instance.cmd_start))
     app.add_handler(CommandHandler("clone", bot_instance.cmd_clone))
+    app.add_handler(CommandHandler("reset", bot_instance.cmd_reset))
 
     logging.info("Telegram Controller Started Successfully.")
     await app.run_polling()
