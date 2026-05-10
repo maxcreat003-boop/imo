@@ -1,11 +1,17 @@
 #!/bin/bash
 
+# Start the Telegram Bot IMMEDIATELY so it responds to commands while waiting for the emulator
+echo "[BOT] Launching Telegram Controller in background..."
+/opt/venv/bin/python3 /app/bot.py &
+
 echo "[BOOT] Automation logic initiated. Waiting 160 seconds for emulator stabilization..."
 sleep 160
 
 echo "[ADB] Establishing connection to localhost:5555..."
 adb connect localhost:5555
-adb wait-for-device
+
+# Only wait up to 120 seconds for the device so it doesn't hang forever if software emulation is slow
+timeout 120 adb wait-for-device
 
 echo "[SYSTEM] Creating 10 Isolated User Profiles (Clone_1 to Clone_10)..."
 for i in {1..10}
@@ -22,5 +28,5 @@ do
     fi
 done
 
-echo "[BOT] Launching Telegram Controller..."
-/opt/venv/bin/python3 /app/bot.py
+# Keep script running to prevent supervisor from restarting it
+wait
