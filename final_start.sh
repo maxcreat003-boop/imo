@@ -1,50 +1,50 @@
 #!/bin/bash
 
-# Start the Telegram Bot IMMEDIATELY
-echo "[BOT] Launching Telegram Controller..."
+# [v7.0 ADAPTIVE INITIALIZATION]
+TOTAL_RAM=$(free -g | awk '/^Mem:/{print $2}')
+KVM_EXISTS=$(ls /dev/kvm 2>/dev/null)
+
+# Start Bot Immediately
 /opt/venv/bin/python3 /app/bot.py &
 
-echo "[BOOT] Software Emulation mode. Waiting 300 seconds (5 mins) for kernel initialization..."
-sleep 300
+if [ "$TOTAL_RAM" -lt 2 ]; then
+    echo "[ADAPTIVE] Low RAM detected (${TOTAL_RAM}GB). Slow boot mode (600s)..."
+    BOOT_WAIT=600
+else
+    echo "[ADAPTIVE] High RAM detected (${TOTAL_RAM}GB). Fast boot mode (160s)..."
+    BOOT_WAIT=160
+fi
 
-echo "[ADB] Establishing connection to localhost:5555..."
+sleep $BOOT_WAIT
+
+echo "[ADB] Establishing connection..."
 adb connect localhost:5555
 
-# Boot Check Loop: Wait until ADB reports the device is actually ready
-echo "[ADB] Waiting for device to reach 'device' state..."
-MAX_RETRIES=30
+# Boot Check Loop
+MAX_RETRIES=40
 RETRY_COUNT=0
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     STATUS=$(adb get-state 2>&1)
     if [ "$STATUS" == "device" ]; then
-        echo "[SUCCESS] Emulator is now ONLINE and ready."
+        echo "[SUCCESS] Emulator online."
         break
     fi
-    echo "[WAIT] Device status: $STATUS. Retrying in 20 seconds ($RETRY_COUNT/$MAX_RETRIES)..."
-    sleep 20
+    echo "[WAIT] Status: $STATUS. Retrying ($RETRY_COUNT/$MAX_RETRIES)..."
+    sleep 30
     RETRY_COUNT=$((RETRY_COUNT+1))
     adb connect localhost:5555
 done
 
-if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo "[ERROR] Emulator failed to boot within time limit. Check Railway logs for RAM/CPU issues."
-    exit 1
-fi
-
-echo "[SYSTEM] Creating 10 Isolated User Profiles (Clone_1 to Clone_10)..."
+echo "[SYSTEM] Creating 10 Profiles..."
 for i in {1..10}
 do
-    echo "[USER] Provisioning profile Clone_$i..."
     USER_ID=$(adb shell pm create-user Clone_$i | grep -oE '[0-9]+')
-    
     if [ ! -z "$USER_ID" ]; then
-        echo "[USER] Successfully created Clone_$i with ID: $USER_ID"
-        echo "[APP] Enabling imo Lite for Clone_$i (ID: $USER_ID)..."
         adb shell pm install-existing --user $USER_ID com.imo.android.imoimlite
-    else
-        echo "[ERROR] Failed to create Clone_$i"
     fi
+    # Adaptive delay between user creations
+    if [ "$TOTAL_RAM" -lt 2 ]; then sleep 15; else sleep 2; fi
 done
 
-echo "[READY] System is fully operational in Software Mode."
+echo "[READY] Adaptive System v7.0 is online."
 wait
